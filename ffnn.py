@@ -23,7 +23,10 @@ class FFNN(nn.Module):
         self.activation = nn.ReLU() # The rectified linear unit; one valid choice of activation function
         self.output_dim = 5
         self.W2 = nn.Linear(h, self.output_dim)
-
+        
+        self.dropout = nn.Dropout(0.5)
+        self.bn1 = nn.BatchNorm1d(h)
+        
         self.softmax = nn.LogSoftmax() # The softmax function that converts vectors into probability distributions; computes log probabilities for computational benefits
         self.loss = nn.NLLLoss() # The cross-entropy/negative log likelihood loss taught in class
 
@@ -32,11 +35,17 @@ class FFNN(nn.Module):
 
     def forward(self, input_vector):
         # [to fill] obtain first hidden layer representation
-
+        # attempting do de-linarize our input vector to understand and capture more data
+        h1 = self.activation(self.W1(input_vector))
+        
         # [to fill] obtain output layer representation
+        h2 = self.W2(h1)
 
         # [to fill] obtain probability dist.
+        # We use softmax to normalize
+        predicted_vector = self.softmax(h2)
 
+        
         return predicted_vector
 
 
