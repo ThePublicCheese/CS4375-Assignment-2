@@ -12,32 +12,48 @@ import json
 import string
 from argparse import ArgumentParser
 import pickle
+import pprint
 
 unk = '<UNK>'
+
 # Consult the PyTorch documentation for information on the functions used below:
 # https://pytorch.org/docs/stable/torch.html
 class RNN(nn.Module):
     def __init__(self, input_dim, h):  # Add relevant parameters
         super(RNN, self).__init__()
+        self.inputs = input_dim
         self.h = h
         self.numOfLayer = 1
         self.rnn = nn.RNN(input_dim, h, self.numOfLayer, nonlinearity='tanh')
         self.W = nn.Linear(h, 5)
         self.softmax = nn.LogSoftmax(dim=1)
         self.loss = nn.NLLLoss()
+        self.embedding = nn.Embedding(num_embeddings=vocab_size, embedding_dim=50)
 
+    
+###
     def compute_Loss(self, predicted_vector, gold_label):
         return self.loss(predicted_vector, gold_label)
 
-    def forward(self, inputs):
-        # [to fill] obtain hidden layer representation (https://pytorch.org/docs/stable/generated/torch.nn.RNN.html)
-        _, hidden = 
-        # [to fill] obtain output layer representations
+    def forward(self, inputs): 
+        
+        embeddings = self.embedding(inputs)
 
+        # [to fill] obtain hidden layer representation (https://pytorch.org/docs/stable/generated/torch.nn.RNN.html)
+        output, hidden = self.rnn(embeddings)
+        
         # [to fill] sum over output 
+        output_sum = output.sum(dim=0)
+        
+        #averaging and combining
+        combined_representation = (output_sum + hidden[-1]) / 2
+        
+        # [to fill] obtain output layer representations
+        output_layer = self.W(combined_representation)
 
         # [to fill] obtain probability dist.
-
+        predicted_vector = self.softmax(output_layer)
+        
         return predicted_vector
 
 
@@ -46,7 +62,26 @@ def load_data(train_data, val_data):
         training = json.load(training_f)
     with open(val_data) as valid_f:
         validation = json.load(valid_f)
+        
+    ### Creating and making a word embedding file if one does not exist within the current context
 
+    # Collect unique words from training data
+    if not os.path.exists("word_embedding.pkl"):
+        vocab = set()
+        for entry in training:
+            words = entry["text"].lower()
+            words = words.translate(str.maketrans("", "", string.punctuation))
+            words = words.split()
+            vocab.update(words)
+        print(f"Vocabulary size: {len(vocab)}")
+
+        word_embedding = {word: np.random.uniform(-0.1, 0.1, 50).tolist() for word in vocab}
+        word_embedding['unk'] = np.random.uniform(-0.1, 0.1, 50).tolist()
+
+        # Save as pickle file
+        with open('word_embedding.pkl', 'wb') as f:
+            pickle.dump(word_embedding, f)
+        
     tra = []
     val = []
     for elt in training:
@@ -77,10 +112,21 @@ if __name__ == "__main__":
     # Option 3 will be the most time consuming, so we do not recommend starting with this
 
     print("========== Vectorizing data ==========")
+    
+    ###changing for embedding and to help update it so our libraries get stronger over time
+    #possibility for overtraining ? ? ? 
+    word_embedding = pickle.load(open('./word_embedding.pkl', 'rb'))
+    vocab_size = len(word_embedding)
+    
+    embedding_layer = nn.Embedding(num_embeddings=vocab_size, embedding_dim=50)
+    embedding_layer.weight.data.copy_(torch.tensor(list(word_embedding.values())))
+    embedding_layer.weight.requires_grad = True
+    ###
+    
     model = RNN(50, args.hidden_dim)  # Fill in parameters
+    
     # optimizer = optim.SGD(model.parameters(), lr=0.01, momentum=0.9)
     optimizer = optim.Adam(model.parameters(), lr=0.01)
-    word_embedding = pickle.load(open('./word_embedding.pkl', 'rb'))
 
     stopping_condition = False
     epoch = 0
@@ -99,6 +145,8 @@ if __name__ == "__main__":
         minibatch_size = 16
         N = len(train_data)
 
+        vocab = {word: idx for idx, word in enumerate(word_embedding.keys())}
+
         loss_total = 0
         loss_count = 0
         for minibatch_index in tqdm(range(N // minibatch_size)):
@@ -112,10 +160,10 @@ if __name__ == "__main__":
                 input_words = input_words.translate(input_words.maketrans("", "", string.punctuation)).split()
 
                 # Look up word embedding dictionary
-                vectors = [word_embedding[i.lower()] if i.lower() in word_embedding.keys() else word_embedding['unk'] for i in input_words ]
+                vectors = [vocab.get(word.lower(), vocab['unk']) for word in input_words]
 
                 # Transform the input into required shape
-                vectors = torch.tensor(vectors).view(len(vectors), 1, -1)
+                vectors = torch.tensor(vectors).view(-1, 1)
                 output = model(vectors)
 
                 # Get loss
@@ -153,15 +201,17 @@ if __name__ == "__main__":
         for input_words, gold_label in tqdm(valid_data):
             input_words = " ".join(input_words)
             input_words = input_words.translate(input_words.maketrans("", "", string.punctuation)).split()
-            vectors = [word_embedding[i.lower()] if i.lower() in word_embedding.keys() else word_embedding['unk'] for i
-                       in input_words]
+            # Convert input_words to indices
+            vectors = [vocab.get(word.lower(), vocab['unk']) for word in input_words]
+            vectors = torch.tensor(vectors).view(-1, 1)  # Shape: [seq_len, batch_size]
 
-            vectors = torch.tensor(vectors).view(len(vectors), 1, -1)
+            # Forward pass
             output = model(vectors)
             predicted_label = torch.argmax(output)
             correct += int(predicted_label == gold_label)
             total += 1
             # print(predicted_label, gold_label)
+        
         print("Validation completed for epoch {}".format(epoch + 1))
         print("Validation accuracy for epoch {}: {}".format(epoch + 1, correct / total))
         validation_accuracy = correct/total
@@ -175,6 +225,15 @@ if __name__ == "__main__":
             last_train_accuracy = trainning_accuracy
 
         epoch += 1
+    
+    
+    print("Saving updated word embeddings.")
+    updated_embeddings = model.embedding.weight.data.numpy()
+    updated_word_embedding = dict(zip(word_embedding.keys(), updated_embeddings))
+
+    with open('word_embedding.pkl', 'wb') as f:
+        pickle.dump(updated_word_embedding, f)
+    print("Updated embeddings saved.")
 
 
 
